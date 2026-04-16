@@ -40,6 +40,7 @@ public sealed class Movement2D : Component
     [Property, Group("Platformer")]
     public bool AllowDoubleJump { get; set; } = false;
 
+     
     // ── Components 
 
     [Property, Group("Components")]
@@ -52,7 +53,7 @@ public sealed class Movement2D : Component
 
     [Property, Group("Sprite")]
     public bool FlipOnMove { get; set; } = true;
-
+    public bool SpriteDirectionRight { get; set; } = true;
     [Property, Group("Sprite")]
     [Title("Idle Animation")]
     public string IdleAnimation { get; set; } = "idle";
@@ -247,13 +248,25 @@ public sealed class Movement2D : Component
 	// I setup my sprites facing right if you are using sprites facing left swap false and true bools in Fliphorizontal =X
     // ────────────────────────────────────────────────────────────────────────
 
+   
     private void UpdateSprite()
     {
+        if(!SpriteDirectionRight){
         if (!FlipOnMove || SpriteRenderer is null) return;
 
         if (Velocity.x > 0.1f)
             SpriteRenderer.FlipHorizontal = false;
         else if (Velocity.x < -0.1f)
             SpriteRenderer.FlipHorizontal = true;
+        }
+        else if ( SpriteDirectionRight )
+        {
+              if (!FlipOnMove || SpriteRenderer is null) return;
+
+        if (Velocity.x > 0.1f)
+            SpriteRenderer.FlipHorizontal = true;
+        else if (Velocity.x < -0.1f)
+            SpriteRenderer.FlipHorizontal = false;
+        }
     }
 }

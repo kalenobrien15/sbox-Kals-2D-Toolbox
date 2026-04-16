@@ -247,7 +247,7 @@ Calling `AssetSystem.RegisterFile(path)` on a newly created file causes the Asse
 
 **Workaround:** Delete the `.sbox` cache folder in your project root to restore the Asset Browser.
 
-**Status:** Reported to Facepunch — [sbox-issues](https://github.com/Facepunch/sbox-issues)
+**Status:** Reported to Facepunch — [sbox-issues]
 
 This call has been removed from the current version of the tool. The `.sprite` file will appear in the asset browser naturally when the editor's file watcher picks it up.
 

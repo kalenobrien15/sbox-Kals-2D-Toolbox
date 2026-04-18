@@ -27,7 +27,7 @@ The core movement controller. Add this to your player GameObject alongside a `Sp
 | Mode | Description |
 |---|---|
 | **Top-Down** (default) | WASD moves in all four directions. Diagonal movement is normalised so speed is always consistent. |
-| **Platformer** | A/D move horizontally, Space/Jump to jump, gravity applied automatically. |
+| **Platformer** | A/D move horizontally, Space/Jump to jump, gravity applied automatically. Wall jumping, Particles for dust |
 
 **Inspector properties:**
 
@@ -44,14 +44,16 @@ The core movement controller. Add this to your player GameObject alongside a `Sp
 | Sprite | Flip On Move | `true` | Flips sprite horizontally based on direction |
 | Sprite | Idle Animation | `"idle"` | Animation name to play when still |
 | Sprite | Move Animation | `"move"` | Animation name to play when moving |
+| Sprite | Jump Animation | `"Jump"` | Animation name to play when moving |
+| Sprite | Jump Animation | `"WallSlide"` | Animation name to play when moving |
 
 **Animation behaviour:**
 - Switches between idle and move animations only when the state changes — won't restart the animation every frame
 - Playback speed scales with velocity, so the walk cycle slows naturally as the character decelerates
+- Collision with walls plays wall slide
+- Jump is self explantory
 
 **TODO:**
-- Reference to jump animation.
-- Wall jumping for platformer.
 - Coyote Time.
 
 **Input actions required** (set up in Project Settings → Input):
@@ -147,7 +149,7 @@ Set your camera rotation to `(0, 90, 0)` and position it back on the negative X 
 - `Collider2D` ignores objects tagged `player` and `trigger` by default — ensure your walls/obstacles have colliders but not these tags
 - The `[Range]` attribute on properties will show obsolete warnings in s&box 26.04.08 — replace `[Range(min, max, step)]` with `[Range(min, max), Step(step)]` to resolve
 
-# Sprite Atlas Slicer
+# Sprite Atlas Slicer (BUGGED RN)
 <img width="870" height="700" alt="atlasslicer" src="https://github.com/user-attachments/assets/5b8164a0-da2d-4550-ba35-0e17e36a31c0" />
 
 An s&box editor tool for slicing spritesheets into individual frame PNGs and automatically creating a `.sprite` asset ready to use with `SpriteRenderer`.

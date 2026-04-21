@@ -4,8 +4,6 @@ A set of lightweight 2D game components for [s&box](https://sbox.game/) built on
 
 > Built and tested on s&box update **26.04.08**
 
-https://github.com/user-attachments/assets/6520f729-4653-49ad-b655-1ad2c2f8680b
-
 ---
 
 # Initial project setup
@@ -56,20 +54,40 @@ The core movement controller. Add to your player GameObject alongside a `SpriteR
 | Wall Slide | Initial Slide Speed | `30` | Fall speed when first touching the wall |
 | Wall Slide | Maximum Slide Speed | `200` | Maximum fall speed while sliding — approached over time |
 | Wall Slide | Slide Acceleration Time | `1.5s` | How long it takes to ramp from initial to maximum slide speed |
+| Audio | Jump Sound | — | `SoundEvent` played on jump |
+| Audio | Wall Jump Sound | — | `SoundEvent` played on wall jump |
+| Audio | Land Sound | — | `SoundEvent` played on landing |
+| Audio | Heavy Land Sound | — | `SoundEvent` played when landing after a large fall |
+| Audio | Heavy Land Speed Threshold | `600` | Downward velocity required to trigger the heavy land sound |
+| Audio | Wall Slide Sound | — | `SoundEvent` played while wall sliding — loops and stops automatically |
 | Particles | Jump Dust Emitter | — | `ParticleSphereEmitter` for jump burst |
 | Particles | Jump Dust Effect | — | `ParticleEffect` target for jump dust |
 | Particles | Jump Dust Count | `10` | Number of particles per jump burst |
 | Particles | Move Dust Emitter | — | `ParticleSphereEmitter` for run trail |
-| Particles | Wall Slide Emitter | — | `ParticleSphereEmitter` for wall slide hand friction |
+| Particles | Wall Slide Emitter | — | `ParticleSphereEmitter` for wall slide friction |
 | Sprite | Flip On Move | `true` | Flips sprite horizontally based on facing direction |
 | Sprite | Sprite Faces Right | `true` | Set to `false` if your sprite art faces left by default |
 | Sprite | Idle Animation | `"idle"` | Animation played when still |
 | Sprite | Move Animation | `"move"` | Animation played when running |
 | Sprite | Jump Animation | `"jump"` | Animation played when airborne |
 | Sprite | Wall Slide Animation | `"wallslide"` | Animation played when wall sliding |
-| Sprite | Death Animation | `"death"` | Animation played on death |
+| Sprite | Death Animation | `"death"` | Animation played while airborne during death knockback |
+| Sprite | Death Ground Animation | `"deathground"` | Animation played when landing after death |
 
-**Animation priority:** wallslide → jump/fall → move → idle. Switches immediately when state changes — no sticky transitions.
+**Animation priority:** wallslide → jump/fall → move → idle. Switches immediately when state changes — no sticky transitions. Death animations are locked and cannot be overridden by the normal animation system.
+
+**Footsteps** are driven entirely by the sprite animation system — add a `PlaySound` broadcast event on the footstep frames in your walk animation in the sprite editor. No code needed.
+
+**Knockback behaviour:**
+- Sprite flip is locked for `0.4s` after a hit — player always faces toward the source of damage
+- If knocked into a wall during knockback, facing corrects automatically to face away from the wall
+- When knockback timer expires the player faces whichever direction they last moved
+
+**Death behaviour:**
+- On death, input is blocked but physics and gravity keep running so knockback carries naturally
+- The death air animation plays while the player is airborne
+- When the player lands, the ground death animation plays and the pixelate sequence begins
+- If the player is already grounded when death triggers, knockback launches them before waiting for landing
 
 **Particle setup:**
 - **Jump dust** — one-shot burst on jump and wall jump. Loop should be **off**.
@@ -78,17 +96,18 @@ The core movement controller. Add to your player GameObject alongside a `SpriteR
 
 **Wall jump tuning tips:**
 - Increase `Wall Jump Cooldown` to prevent spam on the same wall
-- `Wall Kick Duration` and cooldown together control whether climbing between two adjacent walls is possible as a skill move
 - Wall colliders must have the **`wall`** tag for detection to work
 
-*Public references (used by `Health2D`):**
+**Public API (used by `Health2D`):**
 
 ```csharp
 movement.ApplyImpulse( new Vector2( horizontal, vertical ) ); // knockback
-movement.TriggerDeath();    // disables input, plays death anim
-movement.TriggerRespawn();  // resets state, plays idle
+movement.TriggerDeathAir();  // blocks input, keeps physics running, plays death anim
+movement.TriggerDeath();     // freezes player, plays ground death anim
+movement.TriggerRespawn();   // resets state, plays idle
 movement.InputAllowed = true/false;
-movement.FacingDirection;   // 1 = right, -1 = left (read-only)
+movement.FacingDirection;    // 1 = right, -1 = left (read-only)
+movement.IsGrounded;         // read-only, used by Health2D death sequence
 ```
 
 **Input actions required:**
@@ -124,6 +143,8 @@ A custom box collider for 2D games on Source 2's axis layout. Uses physics trace
 - Box visualised in the editor viewport when the GameObject is selected
 - Slides along surfaces rather than stopping dead on collision
 - Ignores objects tagged `player` and `trigger`
+
+> Note: `Collider2D` uses trace sweeps, not physics — s&box's `ITriggerListener` will not fire for this collider. Use the position overlap approach in `DamageZone2D` and `Checkpoint2D` instead.
 
 ---
 
@@ -167,10 +188,6 @@ Replaces `StartAnimation.cs`. Manages the pixelate intro on scene load and gates
 
 ## `Health2D.cs`
 
-https://github.com/user-attachments/assets/6505204e-4f0a-4d6e-97c6-1017e1ab9eb9
-
-https://github.com/user-attachments/assets/4bfe848c-3c64-4906-970f-111e48da8224
-
 Full health and damage system. Add to your player GameObject alongside `Movement2D` and `SpriteRenderer`.
 
 **Inspector properties:**
@@ -179,7 +196,7 @@ Full health and damage system. Add to your player GameObject alongside `Movement
 |---|---|---|---|
 | Health | Max Health | `100` | Maximum HP |
 | Iframes | Invincibility Duration | `1s` | Invincible window after flat damage |
-| Iframes | Flash On Damage | `true` | Flashes `OverlayColor` during iframes |
+| Iframes | Flash On Damage | `true` | Flashes sprite `OverlayColor` during iframes |
 | Iframes | Flash Color | Red | Color to flash during iframes |
 | Iframes | Flash Interval | `0.1s` | Flash toggle rate |
 | Knockback | Enable Knockback | `true` | Applies velocity impulse on damage |
@@ -187,22 +204,27 @@ Full health and damage system. Add to your player GameObject alongside `Movement
 | Knockback | Knockback Vertical Force | `200` | Upward push force (platformer only) |
 | Ticking Damage | Ticking Damage Particle | — | Child `ParticleEffect` enabled during poison/fire |
 | Death & Respawn | Camera Pixelate Component | — | `Pixelate` component for death/respawn transition |
-| Death & Respawn | Death Anim Hold Duration | `1s` | Wait before pixelating in on death |
+| Death & Respawn | Death Anim Hold Duration | `1s` | Wait after ground death anim before pixelating in |
 | Death & Respawn | Pixelate In Speed | `2` | Speed of pixelate in on death |
 | Death & Respawn | Blackout Hold Duration | `0.5s` | Hold at full pixelation before respawning |
 | Death & Respawn | Pixelate Out Speed | `2` | Speed of pixelate out after respawn |
-| Regen | Enable Checkpoint Regen | `true` | Heals when checkpoint is set with a heal amount |
+| Regen | Enable Checkpoint Regen | `true` | Heals when checkpoint is triggered with a heal amount |
 | Regen | Full Heal On Respawn | `true` | Restores full HP on respawn |
-| Floating Numbers | Enable Damage Numbers | `true` | World-space floating damage numbers |
+| Floating Numbers | Enable Damage Numbers | `true` | World-space floating damage numbers via `TextRenderer` |
 | Floating Numbers | Float Speed | `80` | How fast numbers float upward |
 | Floating Numbers | Number Lifetime | `1s` | How long numbers are visible |
+| Floating Numbers | Number Spawn Point | — | Child GameObject to use as spawn origin for numbers |
+| Floating Numbers | Number Font | `""` | Font family name for damage numbers |
+| Floating Numbers | Number Font Size | `18` | Font size for damage numbers |
+| Audio | Hurt Sound | — | `SoundEvent` played on flat damage and first tick of ticking damage |
+| Audio | Ticking Sound | — | `SoundEvent` played on every subsequent damage tick |
 | Components | Movement | — | Reference to `Movement2D` (auto-found) |
-| Components | Sprite Renderer | — | Reference to `SpriteRenderer` (auto-found) |
+| Components | Sprite Renderer | — | Reference to `SpriteRenderer` (must be assigned) |
 
-**Public references to do damage:**
+**Public API:**
 
 ```csharp
-// Flat damage with optional attacker position for top-down knockback direction
+// Flat damage with optional attacker position for knockback direction
 health.TakeDamage( 10f );
 health.TakeDamage( 10f, attackerWorldPosition );
 
@@ -214,7 +236,7 @@ health.ApplyTickingDamage( damagePerTick: 1f, tickInterval: 1f, totalDuration: 3
 // Heal
 health.Heal( 25f );
 
-// Checkpoint — call from your own checkpoint trigger script
+// Checkpoint
 health.SetCheckpoint( WorldPosition );
 health.SetCheckpoint( WorldPosition, healAmount: 50f );
 ```
@@ -229,32 +251,43 @@ health.OnRespawned += () => { };
 ```
 
 **Death sequence:**
-1. Input disabled, death animation plays
-2. Wait `Death Anim Hold Duration`
-3. Screen pixelates in at `Pixelate In Speed`
-4. Hold at full pixelation for `Blackout Hold Duration`
-5. Player teleports to last checkpoint, HP restored if `Full Heal On Respawn` is on
-6. Screen unpixelates at `Pixelate Out Speed`
-7. Input re-enabled
+1. Flash cleared, knockback applied
+2. Input blocked, physics keeps running — player flies through the air
+3. Player lands — ground death animation plays
+4. Wait `Death Anim Hold Duration`
+5. Screen pixelates in at `Pixelate In Speed`
+6. Hold at full pixelation for `Blackout Hold Duration`
+7. Player teleports to last checkpoint, HP restored if `Full Heal On Respawn` is on
+8. Screen unpixelates at `Pixelate Out Speed`
+9. Input re-enabled
 
-**Floating numbers:** (THIS ISNT WORKING RIGHT YET FORGIVE ME)
+**Floating numbers:**
 - Flat damage → **white**
 - Ticking damage → **orange**
-- Numbers float upward and fade over `Number Lifetime` seconds
+- Numbers float upward and fade using `TextRenderer` — always visible, no gizmos required
+- Spawn position controlled by `Number Spawn Point` child reference
 
 **Knockback notes:**
-- Platformer mode: knockback is opposite to `FacingDirection` with an upward component
-- Top-down mode: knockback is away from the attacker position
-- Sprite flip is locked during knockback — player always faces toward the source of damage
-- If knocked into a wall, facing corrects automatically to the wall slide direction
+- Knockback fires before death is triggered on fatal hits so velocity carries
+- Sprite flip locked during knockback — player faces toward the damage source
+- If knocked into a wall, facing corrects to the wall slide direction
 
 ---
 
-## `HealthHUD2D.cs`
+## `HealthHUD2D.cs` + `HealthBar.razor`
 
-Screen-space health HUD. Add as a `PanelComponent` to a separate UI GameObject that also has a `ScreenPanel` component. `Health2D` finds it automatically — no wiring needed.
+Screen-space health HUD using Razor panels. Requires both components on the same UI GameObject.
 
-**Inspector properties:**
+**Scene setup:**
+1. Create an empty GameObject
+2. Add `ScreenPanel` component
+3. Add `HealthHUD2D` component
+4. Add `HealthBar` Razor PanelComponent
+5. Place `HealthBar.razor` and `HealthBar.razor.scss` in your project's `ui/` folder
+
+`Health2D` finds the HUD automatically via the scene — no wiring needed.
+
+**Inspector properties (`HealthHUD2D`):**
 
 | Group | Property | Default | Description |
 |---|---|---|---|
@@ -263,25 +296,68 @@ Screen-space health HUD. Add as a `PanelComponent` to a separate UI GameObject t
 | Bar | Bar Color (low) | Red | Bar fill color at or below low health threshold |
 | Bar | Low Health Threshold | `0.25` | Fraction of max HP where bar turns red |
 | Bar | Show HP Text | `true` | Shows `current / max` centered on the bar |
-| Bar | HP Text Font | `"Roboto"` | Font family name or path to `.ttf` in your UI folder |
+| Bar | HP Text Font | `""` | Font family name for HP text |
+| Bar | HP Text Font Size | `14` | Font size for HP text |
 | Bar | HP Text Color | White | Color of the HP text |
-| Hearts | Heart Filled Texture | — | `Texture` asset for filled heart |
-| Hearts | Heart Empty Texture | — | `Texture` asset for empty heart |
+| Bar | Text Padding Top | `0` | Nudge text vertically to center for pixel fonts |
+| Bar | Text Padding Left | `0` | Left padding on HP text |
+| Bar | Text Padding Right | `0` | Right padding on HP text |
+| Hearts | Heart Filled Texture | — | PNG file picker — drag your filled heart image in |
+| Hearts | Heart Empty Texture | — | PNG file picker — drag your empty heart image in |
 | Hearts | Heart Size | `32px` | Width and height of each heart |
+| Hearts | Heart Spacing | `4px` | Gap between hearts — negative values overlap |
 | Layout | Position | `(20, 20)` | Offset from top-left of screen in pixels |
 | Layout | Bar Width | `200px` | Width of the health bar |
 | Layout | Bar Height | `20px` | Height of the health bar |
 
 **Heart mode notes:**
 - Heart count is dynamic — one heart per point of `MaxHealth`
-- `ImageRendering` is set to `Point` automatically — pixel art hearts stay sharp
-- Rebuilds on every `UpdateHealth` call
+- Heart textures are PNG files dragged directly from the asset browser
+- `image-rendering: pixelated` applied automatically — pixel art hearts stay sharp
+- Negative `Heart Spacing` lets you overlap hearts for a tight packed look
 
-**Scene setup:**
-1. Create an empty GameObject
-2. Add `ScreenPanel` component
-3. Add `HealthHUD2D` component
-4. Configure in inspector
+---
+
+## `Checkpoint2D.cs`
+
+Position overlap checkpoint — no physics collider required. Uses the same overlap detection as `DamageZone2D`.
+
+**Inspector properties:**
+
+| Group | Property | Default | Description |
+|---|---|---|---|
+| Checkpoint | Heal Amount On Touch | `0` | HP restored when player enters the zone. `0` = no healing |
+| Shape | Width | `32` | Zone width in world units |
+| Shape | Height | `32` | Zone height in world units |
+| Shape | Offset | `(0,0,0)` | Offset of the zone centre |
+
+**Behaviour:**
+- Yellow gizmo shows detection area in the editor
+- `_triggered` flag resets when the player leaves — can be activated again if the player returns
+- Calls `Health2D.SetCheckpoint( WorldPosition, HealAmount )` on touch
+
+---
+
+## `DamageZone2D.cs`
+
+Position overlap damage zone. Add to any GameObject to deal flat or ticking damage when the player enters.
+
+**Inspector properties:**
+
+| Group | Property | Default | Description |
+|---|---|---|---|
+| Damage | Damage | `10` | Damage amount |
+| Damage | Is Ticking Damage | `false` | Deals ticking damage instead of flat |
+| Damage | Tick Interval | `0.5s` | Seconds between each tick |
+| Damage | Tick Duration | `3s` | Total duration of ticking effect |
+| Shape | Width | `32` | Zone width in world units |
+| Shape | Height | `32` | Zone height in world units |
+| Shape | Offset | `(0,0,0)` | Offset of the zone centre |
+
+**For irregular shapes** — add multiple `DamageZone2D` components to child GameObjects, each positioned and sized to approximate your sprite's shape. They work independently and together cover the full area.
+
+- Flat damage zones rely on `Health2D` iframes to prevent spam damage
+- Ticking damage restarts the timer if the player re-enters before it expires
 
 ---
 
@@ -304,8 +380,8 @@ Add to your player GameObject alongside `Health2D`. Set up `damage`, `poison`, a
 **Player GameObject:**
 - `SpriteRenderer` — assign your `.sprite` asset
 - `Collider2D` — tune width, height, offset to match your sprite
-- `Movement2D` — auto-discovers collider and sprite renderer, set animation names and particle references
-- `Health2D` — drag in `Movement2D`, `SpriteRenderer`, `Pixelate` component, and ticking particle if needed
+- `Movement2D` — auto-discovers collider and sprite renderer, set animation names, audio, and particle references
+- `Health2D` — drag in `Movement2D`, `SpriteRenderer`, `Pixelate` component. Assign ticking particle and number spawn point if needed
 
 **Camera GameObject:**
 - `CameraFollow2D` — drag player into Follow Target, set Lock X = true
@@ -315,16 +391,26 @@ Add to your player GameObject alongside `Health2D`. Set up `damage`, `poison`, a
 **UI GameObject (separate, not a child of player):**
 - `ScreenPanel`
 - `HealthHUD2D`
+- `HealthBar` (Razor PanelComponent)
 
-**Checkpoint script (write your own):**
-```csharp
-void OnTriggerEnter( GameObject other )
-{
-    var health = other.GetComponent<Health2D>();
-    if ( health is null ) return;
-    health.SetCheckpoint( WorldPosition, healAmount: 0f );
-}
-```
+**Razor files — place in `ui/` folder:**
+- `HealthBar.razor`
+- `HealthBar.razor.scss`
+- `DamageNumber.razor`
+- `DamageNumber.razor.scss`
+
+**Fonts — place in `Assets/fonts/` folder:**
+- Font files must be named exactly as you type them in the font field
+- e.g. `m6x11.ttf` is referenced as `m6x11`
+- s&box resolves fonts by filename, not internal font name
+
+**Checkpoint — add `Checkpoint2D` to any GameObject:**
+- Size the yellow zone to cover the trigger area
+- Set `Heal Amount` if you want HP restored on touch
+
+**Damage zones — add `DamageZone2D` to any GameObject:**
+- Size the zone to match your hazard sprite
+- For complex shapes use multiple `DamageZone2D` components on child GameObjects
 
 ---
 
@@ -346,9 +432,10 @@ Set your camera rotation to `(0, 90, 0)` and position it back on the negative X 
 
 - Platformer ground detection uses a short downward raycast (`0.25` units) — works best with flat horizontal surfaces
 - Wall detection requires wall colliders to have the **`wall`** tag
-- `Collider2D` ignores objects tagged `player` and `trigger` by default
+- `Collider2D` ignores objects tagged `player` and `trigger` by default — `ITriggerListener` will not fire
 - The `[Range]` attribute with three arguments shows obsolete warnings — use `[Range(min, max), Step(step)]`
-- `Health2D` floating numbers use `Gizmo.Draw.Text` which renders in world space — may not be visible depending on gizmo settings in your project
+- Floating damage numbers use `TextRenderer` — font is set via the `Number Font` field using the filename of a font in `Assets/fonts/`
+- Custom fonts must have their filename match exactly what you type in the font field — s&box resolves by filename not internal font name
 
 ---
 

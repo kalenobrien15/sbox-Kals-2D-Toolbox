@@ -1,4 +1,5 @@
 using Sandbox;
+using Sandbox.UI;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -123,6 +124,20 @@ public sealed class Health2D : Component
 	[Title( "Number Lifetime (s)" )]
 	public float NumberLifetime { get; set; } = 1f;
 
+	[Property, Group( "Floating Numbers" )]
+	[Title( "Number Spawn Point" )]
+	/// <summary>Child GameObject to use as the spawn origin for damage numbers. If unset defaults to player position + 20 units up.</summary>
+	public GameObject NumberSpawnPoint { get; set; }
+
+	[Property, Group( "Floating Numbers" )]
+	[Title( "Number Font" )]
+	public string NumberFont { get; set; } = "Roboto";
+
+	[Property, Group( "Floating Numbers" )]
+	[Range( 8f, 64f ), Step( 1f )]
+	[Title( "Number Font Size" )]
+	public float NumberFontSize { get; set; } = 18f;
+
 	// ── Components ────────────────────────────────────────────────────────────
 
 	[Property, Group( "Components" )]
@@ -130,6 +145,18 @@ public sealed class Health2D : Component
 
 	[Property, Group( "Components" )]
 	public SpriteRenderer SpriteRenderer { get; set; }
+
+	// ── Audio ────────────────────────────────────────────────────────────────
+
+	[Property, Group( "Audio" )]
+	[Title( "Hurt Sound (Flat Damage)" )]
+	/// <summary>Plays on flat damage hit and on the first hit of ticking damage.</summary>
+	public SoundEvent HurtSound { get; set; }
+
+	[Property, Group( "Audio" )]
+	[Title( "Ticking Damage Sound" )]
+	/// <summary>Plays on every tick of ticking damage.</summary>
+	public SoundEvent TickingSound { get; set; }
 
 	// ── Events ────────────────────────────────────────────────────────────────
 
@@ -151,6 +178,7 @@ public sealed class Health2D : Component
 	private bool    _isInvincible      = false;
 	private bool    _isDead            = false;
 	private bool    _isDeathSequence   = false;
+	private bool    _pendingDeath      = false;
 	private Color   _originalColor     = Color.White;
 
 	// Ticking damage
@@ -178,14 +206,7 @@ public sealed class Health2D : Component
 		CurrentHealth = MaxHealth;
 
 		if ( SpriteRenderer is not null )
-		{
 			_originalColor = SpriteRenderer.OverlayColor;
-			Log.Info( $"Health2D: SpriteRenderer found. OverlayColor={_originalColor}" );
-		}
-		else
-		{
-			Log.Warning( "Health2D: SpriteRenderer is NULL - assign it in the inspector" );
-		}
 
 		_checkpointPosition = WorldPosition;
 
@@ -199,11 +220,13 @@ public sealed class Health2D : Component
 
 	protected override void OnUpdate()
 	{
+		// Floating numbers always update regardless of death state
+		UpdateFloatingNumbers();
+
 		if ( _isDeathSequence ) return;
 
 		UpdateIframes();
 		UpdateTickingDamage();
-		UpdateFloatingNumbers();
 	}
 
 	// ── Iframe flash ──────────────────────────────────────────────────────────
@@ -225,7 +248,6 @@ public sealed class Health2D : Component
 				_flashState = !_flashState;
 				_flashTimer = FlashInterval;
 				SpriteRenderer.OverlayColor = _flashState ? FlashColor : _originalColor;
-				
 			}
 		}
 
@@ -249,6 +271,8 @@ public sealed class Health2D : Component
 		if ( _tickTimer <= 0f )
 		{
 			_tickTimer = _tickInterval;
+			if ( TickingSound is not null )
+				Sound.Play( TickingSound, WorldPosition, 0f );
 			ApplyDamageInternal( _tickDamage, DamageType.Ticking, iframes: false );
 		}
 
@@ -273,8 +297,18 @@ public sealed class Health2D : Component
 			fn.Timer -= Time.Delta;
 			fn.WorldPos += Vector3.Up * NumberFloatSpeed * Time.Delta;
 
+			if ( fn.GO is not null && fn.GO.IsValid() )
+			{
+				fn.GO.WorldPosition = fn.WorldPos;
+
+
+			}
+
 			if ( fn.Timer <= 0f )
+			{
+				fn.GO?.Destroy();
 				_floatingNumbers.RemoveAt( i );
+			}
 		}
 	}
 
@@ -282,13 +316,33 @@ public sealed class Health2D : Component
 	{
 		if ( !ShowDamageNumbers ) return;
 
-		var color = type == DamageType.Ticking ? Color.Orange : Color.White;
+		var colorStr = type == DamageType.Ticking ? "orange" : "white";
+		var color    = type == DamageType.Ticking ? Color.Orange : Color.White;
+		var spawnPos = NumberSpawnPoint is not null
+			? NumberSpawnPoint.WorldPosition
+			: WorldPosition + Vector3.Up * 20f;
+
+		var go           = new GameObject( true, "DmgNumber" );
+		go.Parent        = Scene;
+		go.WorldPosition = spawnPos;
+
+		var tr              = go.AddComponent<TextRenderer>();
+		tr.Text             = $"-{(int)damage}";
+		tr.FontSize         = NumberFontSize;
+		tr.Color            = color;
+		tr.FontFamily       = NumberFont;
+		tr.FontWeight       = 700;
+		tr.Scale            = 0.1f;
+
 		_floatingNumbers.Add( new FloatingNumber
 		{
-			WorldPos = WorldPosition + Vector3.Up * 20f,
+			WorldPos = spawnPos,
 			Timer    = NumberLifetime,
-			Text     = $"-{(int)damage}",
-			Color    = color
+			Color    = color,
+			ColorStr = colorStr,
+			Damage   = $"-{(int)damage}",
+			GO       = go,
+			TR       = tr
 		} );
 	}
 
@@ -303,8 +357,17 @@ public sealed class Health2D : Component
 	{
 		if ( _isDead || _isInvincible ) return;
 
+		if ( HurtSound is not null )
+			Sound.Play( HurtSound, WorldPosition, 0f );
+
+		_pendingDeath = false;
 		ApplyDamageInternal( amount, DamageType.Flat, iframes: true );
+
+		// Apply knockback before checking death so velocity carries on fatal hits
 		ApplyKnockback( attackerPosition );
+
+		if ( _pendingDeath )
+			_ = TriggerDeathSequence();
 	}
 
 	/// <summary>
@@ -322,13 +385,16 @@ public sealed class Health2D : Component
 
 		if ( !_isTicking )
 		{
-			// First hit triggers iframes
+			// First hit triggers iframes and hurt sound
 			_isInvincible = true;
 			_iframeTimer  = IframeDuration;
 			_flashTimer   = 0f;
 			_flashState   = true;
 			if ( FlashOnDamage && SpriteRenderer is not null )
 				SpriteRenderer.OverlayColor = FlashColor;
+
+			if ( HurtSound is not null )
+				Sound.Play( HurtSound, WorldPosition, 0f );
 		}
 
 		_isTicking = true;
@@ -425,9 +491,33 @@ public sealed class Health2D : Component
 		StopTickingDamage();
 		OnDeath?.Invoke();
 
-		// Disable input and trigger death animation
+		// Clear iframe flash so sprite shows correctly during death
+		_isInvincible = false;
+		_iframeTimer  = 0f;
+		_flashState   = false;
+		if ( SpriteRenderer is not null )
+			SpriteRenderer.OverlayColor = _originalColor;
+
+		// Block input, keep physics so knockback carries
 		if ( Movement is not null )
+			Movement.TriggerDeathAir();
+
+		// Small delay so knockback launches the player
+		await Task.DelaySeconds( 0.1f );
+		if ( !this.IsValid() ) return;
+
+		// Wait for player to land
+		if ( Movement is not null )
+		{
+			while ( !Movement.IsGrounded )
+			{
+				await Task.Frame();
+				if ( !this.IsValid() ) return;
+			}
+
+			// Landed — freeze and play ground death animation
 			Movement.TriggerDeath();
+		}
 
 		// Wait for death animation + any knockback to settle
 		await Task.DelaySeconds( DeathAnimHoldDuration );
@@ -453,11 +543,14 @@ public sealed class Health2D : Component
 		// Respawn
 		Respawn();
 
-		// Pixelate out
+		// Pixelate out — keep player locked to spawn position during transition
 		if ( PixelateComponent is not null )
 		{
+			var spawnPos = _hasCheckpoint ? _checkpointPosition : WorldPosition;
 			while ( PixelateComponent.Scale > 0f )
 			{
+				WorldPosition = spawnPos;
+				if ( Movement is not null ) Movement.ApplyImpulse( Vector2.Zero );
 				PixelateComponent.Scale -= PixelateOutSpeed * Time.Delta;
 				if ( PixelateComponent.Scale < 0f ) PixelateComponent.Scale = 0f;
 				await Task.Frame();
@@ -507,11 +600,14 @@ public sealed class Health2D : Component
 
 	// ── Helper types ──────────────────────────────────────────────────────────
 
-		private class FloatingNumber
+	private class FloatingNumber
 	{
-		public Vector3 WorldPos;
-		public float   Timer;
-		public string  Text;
-		public Color   Color;
+		public Vector3      WorldPos;
+		public float        Timer;
+		public Color        Color;
+		public string       ColorStr;
+		public string       Damage;
+		public GameObject   GO;
+		public TextRenderer            TR;
 	}
 }

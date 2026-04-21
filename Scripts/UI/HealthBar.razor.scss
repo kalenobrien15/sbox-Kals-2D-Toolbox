@@ -1,0 +1,35 @@
+/* ── Bar ──────────────────────────────────────────────────────────────────── */
+
+.bar-container {
+	position: relative;
+	background-color: rgba( 0, 0, 0, 0.5 );
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.bar-fill {
+	transition-duration: 0.1s;
+	transition-property: width;
+}
+
+.bar-text {
+	font-family: smallhollows;
+	font-smooth: never;
+	image-rendering: pixelated;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+/* ── Hearts ───────────────────────────────────────────────────────────────── */
+
+.hearts {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+}
+
+.heart {
+	background-repeat: no-repeat;
+	image-rendering: pixelated;
+}

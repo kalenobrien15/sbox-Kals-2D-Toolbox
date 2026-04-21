@@ -101,6 +101,10 @@ public sealed class Movement2D : Component
 	[Title( "Death Animation" )]
 	public string DeathAnimation { get; set; } = "death";
 
+	[Property, Group( "Sprite" )]
+	[Title( "Death Ground Animation" )]
+	public string DeathGroundAnimation { get; set; } = "deathground";
+
 	// ── Components ────────────────────────────────────────────────────────────
 
 	[Property, Group( "Components" )]
@@ -131,6 +135,35 @@ public sealed class Movement2D : Component
 	[Property, Group( "Particles" )]
 	[Title( "Wall Slide Emitter" )]
 	public ParticleSphereEmitter WallSlideEmitter { get; set; }
+
+	// ── Audio ────────────────────────────────────────────────────────────────
+
+	[Property, Group( "Audio" )]
+	[Title( "Jump Sound" )]
+	public SoundEvent JumpSound { get; set; }
+
+	[Property, Group( "Audio" )]
+	[Title( "Wall Jump Sound" )]
+	public SoundEvent WallJumpSound { get; set; }
+
+	[Property, Group( "Audio" )]
+	[Title( "Land Sound" )]
+	public SoundEvent LandSound { get; set; }
+
+	[Property, Group( "Audio" )]
+	[Title( "Heavy Land Sound" )]
+	/// <summary>Played when landing after a large fall. Triggered by Fall Speed Threshold.</summary>
+	public SoundEvent HeavyLandSound { get; set; }
+
+	[Property, Group( "Audio" )]
+	[Range( 0f, 2000f ), Step( 50f )]
+	[Title( "Heavy Land Speed Threshold" )]
+	/// <summary>Downward velocity required to trigger the heavy land sound.</summary>
+	public float HeavyLandThreshold { get; set; } = 600f;
+
+	[Property, Group( "Audio" )]
+	[Title( "Wall Slide Sound" )]
+	public SoundEvent WallSlideSound { get; set; }
 
 	// ── Sprite ────────────────────────────────────────────────────────────────
 
@@ -180,6 +213,7 @@ public sealed class Movement2D : Component
 	public float FacingDirection { get; private set; } = 1f;
 
 	private bool   _isRunning        = false;
+	private bool   _isDyingInAir    = false;
 	private string _currentAnim      = "";
 	private int    _jumpsUsed        = 0;
 
@@ -190,6 +224,14 @@ public sealed class Movement2D : Component
 
 	// Knockback — sprite flip is locked for this duration after a hit
 	private float  _knockbackTimer   = 0f;
+
+	// Audio state
+	private bool   _wasGrounded         = false;
+	private float  _peakFallSpeed       = 0f;
+	private bool   _isWallSliding_Audio = false;
+	private bool   _jumpedThisFrame     = false; // prevents land sound on same frame as jump
+	private int    _airborneFrames      = 0;     // must be airborne for N frames before land sound fires
+	private SoundHandle _wallSlideSoundHandle;
 
 	private float  _moveDustRate      = -1f;
 	private float  _wallSlideDustRate = -1f;
@@ -202,7 +244,11 @@ public sealed class Movement2D : Component
 		Collider       ??= Components.Get<Collider2D>();
 		SpriteRenderer ??= Components.Get<SpriteRenderer>();
 		PlayAnimation( IdleAnimation );
+
+
 	}
+
+
 
 	protected override void OnUpdate()
 	{
@@ -210,12 +256,37 @@ public sealed class Movement2D : Component
 
 		if ( PlatformerMode && InputAllowed )
 			UpdatePlatformer();
+		else if ( PlatformerMode && _isDyingInAir )
+			UpdatePlatformerDead(); // physics only, no input
 		else if ( InputAllowed )
 			UpdateTopDown();
 
 		UpdateSprite();
 		UpdateAnimation();
 		UpdateParticles();
+		UpdateAudio();
+	}
+
+	// ────────────────────────────────────────────────────────────────────────
+	// PLATFORMER DEAD — physics only, no input
+	// ────────────────────────────────────────────────────────────────────────
+
+	private void UpdatePlatformerDead()
+	{
+		CheckGrounded();
+
+		float newY = Velocity.y;
+
+		if ( IsGrounded && newY < 0f )
+			newY = 0f;
+
+		if ( !IsGrounded )
+			newY -= Gravity * Time.Delta;
+
+		Velocity = new Vector2( Velocity.x, newY );
+
+		var delta = new Vector3( 0f, -Velocity.x, Velocity.y ) * Time.Delta;
+		Move( delta );
 	}
 
 	// ────────────────────────────────────────────────────────────────────────
@@ -314,7 +385,10 @@ public sealed class Movement2D : Component
 				_wallJumpCooldown = WallJumpCooldown;
 				_wallSlideTimer   = 0f;
 				smoothX           = _wallKickDir * WallKickForce;
+				_jumpedThisFrame = true;
 				EmitJumpDust();
+				if ( WallJumpSound is not null )
+					Sound.Play( WallJumpSound, WorldPosition, 0f );
 			}
 			else
 			{
@@ -323,7 +397,10 @@ public sealed class Movement2D : Component
 				{
 					newY = JumpForce;
 					_jumpsUsed++;
+					_jumpedThisFrame = true;
 					EmitJumpDust();
+					if ( JumpSound is not null )
+						Sound.Play( JumpSound, WorldPosition, 0f );
 				}
 			}
 		}
@@ -382,14 +459,24 @@ public sealed class Movement2D : Component
 	/// <summary>
 	/// Trigger the death state — disables input and plays death animation.
 	/// </summary>
+	public void TriggerDeathAir()
+	{
+		// Block ALL input including movement, keep physics/gravity running
+		InputAllowed  = false;
+		_isDyingInAir = true;
+		// Don't play death anim yet — let knockback play out naturally
+		// Ground death anim plays when they land
+	}
+
 	public void TriggerDeath()
 	{
 		IsDead          = true;
+		_isDyingInAir   = false;
 		InputAllowed    = false;
 		_knockbackTimer = 0f;
-		Velocity       = Vector2.Zero;
-		_currentAnim   = "";
-		PlayAnimation( DeathAnimation );
+		// Don't zero velocity here — let gravity settle naturally
+		_currentAnim    = "";
+		PlayAnimation( DeathGroundAnimation );
 	}
 
 	/// <summary>
@@ -398,6 +485,7 @@ public sealed class Movement2D : Component
 	public void TriggerRespawn()
 	{
 		IsDead          = false;
+		_isDyingInAir   = false;
 		_knockbackTimer = 0f;
 		Velocity       = Vector2.Zero;
 		_jumpsUsed     = 0;
@@ -527,12 +615,70 @@ public sealed class Movement2D : Component
 	}
 
 	// ────────────────────────────────────────────────────────────────────────
+	// Audio
+	// ────────────────────────────────────────────────────────────────────────
+
+	private void UpdateAudio()
+	{
+		// Track peak fall speed while airborne for heavy land detection
+		if ( !IsGrounded )
+		{
+			var downSpeed = -Velocity.y; // positive = falling
+			if ( downSpeed > _peakFallSpeed )
+				_peakFallSpeed = downSpeed;
+		}
+
+		// Count how many consecutive frames the player has been airborne
+		if ( !IsGrounded )
+			_airborneFrames++;
+
+		// Landing detection — check BEFORE resetting airborne counter
+		if ( IsGrounded && !_wasGrounded && !_jumpedThisFrame && _airborneFrames >= 3 )
+		{
+			if ( _peakFallSpeed >= HeavyLandThreshold && HeavyLandSound is not null )
+				Sound.Play( HeavyLandSound, WorldPosition, 0f );
+			else if ( LandSound is not null )
+				Sound.Play( LandSound, WorldPosition, 0f );
+
+			_peakFallSpeed = 0f;
+		}
+
+		// Reset counters after landing check
+		if ( IsGrounded )
+			_airborneFrames = 0;
+
+		_jumpedThisFrame = false;
+
+		// Wall slide sound — start/stop based on IsWallSliding
+		if ( IsWallSliding && !_isWallSliding_Audio )
+		{
+			_isWallSliding_Audio = true;
+			if ( WallSlideSound is not null )
+				_wallSlideSoundHandle = Sound.Play( WallSlideSound, WorldPosition, 0f );
+		}
+		else if ( !IsWallSliding && _isWallSliding_Audio )
+		{
+			_isWallSliding_Audio = false;
+			_wallSlideSoundHandle.Stop();
+		}
+
+		// Update wall slide sound position to follow player
+		if ( _isWallSliding_Audio )
+			_wallSlideSoundHandle.Position = WorldPosition;
+
+		_wasGrounded = IsGrounded;
+	}
+
+	// ────────────────────────────────────────────────────────────────────────
 	// Animations
 	// ────────────────────────────────────────────────────────────────────────
 
 	private void UpdateAnimation()
 	{
 		if ( SpriteRenderer is null ) return;
+
+		// Don't override death animations
+		if ( _isDyingInAir ) return;
 
 		string target;
 

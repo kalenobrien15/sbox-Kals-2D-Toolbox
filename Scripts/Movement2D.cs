@@ -1,4 +1,5 @@
 using Sandbox;
+using System.Threading.Tasks;
 
 /// <summary>
 /// 2D movement controller supporting both Top-Down and Platformer modes.
@@ -239,16 +240,27 @@ public sealed class Movement2D : Component
 	// ─────────────────────────────────────────────────────────────────────────
 
 	protected override void OnStart()
+{
+    Collider       ??= Components.Get<Collider2D>();
+    SpriteRenderer ??= Components.Get<SpriteRenderer>();
+    PlayAnimation( IdleAnimation );
+
+    _ = EnableInputAfterInit();
+}
+
+
+
+	private async Task EnableInputAfterInit()
 	{
-		InputAllowed   = false;
-		Collider       ??= Components.Get<Collider2D>();
-		SpriteRenderer ??= Components.Get<SpriteRenderer>();
-		PlayAnimation( IdleAnimation );
+		// Wait one frame so all components have initialized
+		await Task.Frame();
+		if ( !this.IsValid() ) return;
 
-
+		// Only defer input to CameraController2D if it exists AND is enabled
+		// If disabled or not present, enable input immediately
+		var camController = Scene.GetAllComponents<CameraController2D>().FirstOrDefault();
+		InputAllowed = camController is null || !camController.Enabled;
 	}
-
-
 
 	protected override void OnUpdate()
 	{

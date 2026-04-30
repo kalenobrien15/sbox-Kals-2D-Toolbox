@@ -78,6 +78,10 @@ The core movement controller. Add to your player GameObject alongside a `SpriteR
 
 **Footsteps** are driven entirely by the sprite animation system — add a `PlaySound` broadcast event on the footstep frames in your walk animation in the sprite editor. No code needed.
 
+**Input enable behaviour:**
+- If `CameraController2D` is present and enabled in the scene, input is gated by it until the intro completes
+- If `CameraController2D` is absent or disabled, input is enabled automatically on start — no setup needed for basic testing
+
 **Knockback behaviour:**
 - Sprite flip is locked for `0.4s` after a hit — player always faces toward the source of damage
 - If knocked into a wall during knockback, facing corrects automatically to face away from the wall
@@ -85,9 +89,10 @@ The core movement controller. Add to your player GameObject alongside a `SpriteR
 
 **Death behaviour:**
 - On death, input is blocked but physics and gravity keep running so knockback carries naturally
-- The death air animation plays while the player is airborne
-- When the player lands, the ground death animation plays and the pixelate sequence begins
-- If the player is already grounded when death triggers, knockback launches them before waiting for landing
+- `TriggerDeathAir()` is called immediately — disables input, keeps physics running, no anim change
+- When the player lands, `TriggerDeath()` fires — freezes the player and plays `Death Ground Animation`
+- The pixelate death sequence begins after landing
+- If the player is already grounded when death triggers, knockback still launches them before waiting to land
 
 **Particle setup:**
 - **Jump dust** — one-shot burst on jump and wall jump. Loop should be **off**.
@@ -102,9 +107,9 @@ The core movement controller. Add to your player GameObject alongside a `SpriteR
 
 ```csharp
 movement.ApplyImpulse( new Vector2( horizontal, vertical ) ); // knockback
-movement.TriggerDeathAir();  // blocks input, keeps physics running, plays death anim
+movement.TriggerDeathAir();  // blocks input, keeps physics running
 movement.TriggerDeath();     // freezes player, plays ground death anim
-movement.TriggerRespawn();   // resets state, plays idle
+movement.TriggerRespawn();   // resets all state, plays idle
 movement.InputAllowed = true/false;
 movement.FacingDirection;    // 1 = right, -1 = left (read-only)
 movement.IsGrounded;         // read-only, used by Health2D death sequence
@@ -144,7 +149,7 @@ A custom box collider for 2D games on Source 2's axis layout. Uses physics trace
 - Slides along surfaces rather than stopping dead on collision
 - Ignores objects tagged `player` and `trigger`
 
-> Note: `Collider2D` uses trace sweeps, not physics — s&box's `ITriggerListener` will not fire for this collider. Use the position overlap approach in `DamageZone2D` and `Checkpoint2D` instead.
+> Note: `Collider2D` uses trace sweeps, not physics — `ITriggerListener` will not fire for this collider. `DamageZone2D` uses `BoxCollider.OnTriggerEnter` directly instead, and `Checkpoint2D` uses position overlap detection.
 
 ---
 
@@ -169,7 +174,7 @@ Smooth camera follow with optional deadzone. Add to your Camera GameObject.
 
 ## `CameraController2D.cs`
 
-Replaces `StartAnimation.cs`. Manages the pixelate intro on scene load and gates player input. Also used by `Health2D` for the death/respawn transition. Attach to your Camera GameObject.
+Manages the pixelate intro on scene load and gates player input. Also used by `Health2D` for the death/respawn transition. Attach to your Camera GameObject.
 
 **Inspector properties:**
 
@@ -183,6 +188,7 @@ Replaces `StartAnimation.cs`. Manages the pixelate intro on scene load and gates
 - Starts fully pixelated (`Scale = 1`) and clears to `0` over time
 - Sets `Movement2D.InputAllowed = true` once clear
 - The same `Pixelate` component is referenced by `Health2D` for the death/respawn sequence
+- If this component is absent or disabled, `Movement2D` enables input automatically on start
 
 ---
 
@@ -251,15 +257,16 @@ health.OnRespawned += () => { };
 ```
 
 **Death sequence:**
-1. Flash cleared, knockback applied
-2. Input blocked, physics keeps running — player flies through the air
-3. Player lands — ground death animation plays
-4. Wait `Death Anim Hold Duration`
-5. Screen pixelates in at `Pixelate In Speed`
-6. Hold at full pixelation for `Blackout Hold Duration`
-7. Player teleports to last checkpoint, HP restored if `Full Heal On Respawn` is on
-8. Screen unpixelates at `Pixelate Out Speed`
-9. Input re-enabled
+1. Flash cleared, iframe cancelled
+2. Knockback applied — on fatal hits knockback fires before the death sequence starts so velocity carries
+3. Input blocked, physics keeps running — player flies through the air with normal gravity
+4. Player lands — ground death animation plays
+5. Wait `Death Anim Hold Duration`
+6. Screen pixelates in at `Pixelate In Speed`
+7. Hold at full pixelation for `Blackout Hold Duration`
+8. Player teleports to last checkpoint, HP restored if `Full Heal On Respawn` is on
+9. Screen unpixelates at `Pixelate Out Speed`
+10. Input re-enabled
 
 **Floating numbers:**
 - Flat damage → **white**
@@ -292,8 +299,9 @@ Screen-space health HUD using Razor panels. Requires both components on the same
 | Group | Property | Default | Description |
 |---|---|---|---|
 | Display | Use Heart Mode | `false` | Toggle between bar mode and heart icon mode |
-| Bar | Bar Color (full) | Green | Bar fill color at high health |
-| Bar | Bar Color (low) | Red | Bar fill color at or below low health threshold |
+| Bar | Bar Background Color | `rgba(0,0,0,0.5)` | Background color of the bar — supports alpha transparency |
+| Bar | Bar Color (full) | Green | Bar fill color at high health — supports alpha transparency |
+| Bar | Bar Color (low) | Red | Bar fill color at or below low health threshold — supports alpha transparency |
 | Bar | Low Health Threshold | `0.25` | Fraction of max HP where bar turns red |
 | Bar | Show HP Text | `true` | Shows `current / max` centered on the bar |
 | Bar | HP Text Font | `""` | Font family name for HP text |
@@ -306,7 +314,9 @@ Screen-space health HUD using Razor panels. Requires both components on the same
 | Hearts | Heart Empty Texture | — | PNG file picker — drag your empty heart image in |
 | Hearts | Heart Size | `32px` | Width and height of each heart |
 | Hearts | Heart Spacing | `4px` | Gap between hearts — negative values overlap |
-| Layout | Position | `(20, 20)` | Offset from top-left of screen in pixels |
+| Layout | Center At Bottom | `true` | Centers the HUD horizontally at the bottom of the screen — resolution independent |
+| Layout | Bottom Padding | `20px` | Distance from the bottom of the screen when `Center At Bottom` is enabled |
+| Layout | Position | `(20, 20)` | Offset from top-left — only used when `Center At Bottom` is disabled |
 | Layout | Bar Width | `200px` | Width of the health bar |
 | Layout | Bar Height | `20px` | Height of the health bar |
 
@@ -316,11 +326,16 @@ Screen-space health HUD using Razor panels. Requires both components on the same
 - `image-rendering: pixelated` applied automatically — pixel art hearts stay sharp
 - Negative `Heart Spacing` lets you overlap hearts for a tight packed look
 
+**Color notes:**
+- Bar background, full color, and low color all support alpha transparency via the color picker
+- Set bar background to fully transparent for a flat fill-only look
+- Set fill colors to semi-transparent for a stylised HUD effect
+
 ---
 
 ## `Checkpoint2D.cs`
 
-Position overlap checkpoint — no physics collider required. Uses the same overlap detection as `DamageZone2D`.
+Position overlap checkpoint — no physics collider required.
 
 **Inspector properties:**
 
@@ -340,21 +355,24 @@ Position overlap checkpoint — no physics collider required. Uses the same over
 
 ## `DamageZone2D.cs`
 
-Position overlap damage zone. Add to any GameObject to deal flat or ticking damage when the player enters.
+Trigger-based damage zone using `BoxCollider.OnTriggerEnter`. Add alongside a `BoxCollider` set to **Is Trigger**.
 
 **Inspector properties:**
 
 | Group | Property | Default | Description |
 |---|---|---|---|
-| Damage | Damage | `10` | Damage amount |
+| Damage | Damage | `10` | Damage amount per hit |
 | Damage | Is Ticking Damage | `false` | Deals ticking damage instead of flat |
 | Damage | Tick Interval | `0.5s` | Seconds between each tick |
 | Damage | Tick Duration | `3s` | Total duration of ticking effect |
-| Shape | Width | `32` | Zone width in world units |
-| Shape | Height | `32` | Zone height in world units |
-| Shape | Offset | `(0,0,0)` | Offset of the zone centre |
 
-**For irregular shapes** — add multiple `DamageZone2D` components to child GameObjects, each positioned and sized to approximate your sprite's shape. They work independently and together cover the full area.
+**Setup:**
+1. Add a `BoxCollider` to your damage object — check **Is Trigger**
+2. Add `DamageZone2D` to the same GameObject
+3. Make sure your player GameObject is tagged **`player`**
+4. Shape the collider visually in the inspector to match your sprite
+
+**For irregular shapes** — add multiple child GameObjects, each with their own `BoxCollider` (Is Trigger) — `DamageZone2D` automatically subscribes to all `BoxCollider` components on itself and its children so they all feed into the same damage logic.
 
 - Flat damage zones rely on `Health2D` iframes to prevent spam damage
 - Ticking damage restarts the timer if the player re-enters before it expires
@@ -380,12 +398,13 @@ Add to your player GameObject alongside `Health2D`. Set up `damage`, `poison`, a
 **Player GameObject:**
 - `SpriteRenderer` — assign your `.sprite` asset
 - `Collider2D` — tune width, height, offset to match your sprite
+- `BoxCollider` — for damage zone detection, tag the GameObject **`player`**
 - `Movement2D` — auto-discovers collider and sprite renderer, set animation names, audio, and particle references
 - `Health2D` — drag in `Movement2D`, `SpriteRenderer`, `Pixelate` component. Assign ticking particle and number spawn point if needed
 
 **Camera GameObject:**
 - `CameraFollow2D` — drag player into Follow Target, set Lock X = true
-- `CameraController2D` — drag `Pixelate` component and Player in
+- `CameraController2D` — drag `Pixelate` component and Player in (optional — omit for instant input enable)
 - `Pixelate` post-process component
 
 **UI GameObject (separate, not a child of player):**
@@ -402,15 +421,16 @@ Add to your player GameObject alongside `Health2D`. Set up `damage`, `poison`, a
 **Fonts — place in `Assets/fonts/` folder:**
 - Font files must be named exactly as you type them in the font field
 - e.g. `m6x11.ttf` is referenced as `m6x11`
-- s&box resolves fonts by filename, not internal font name
+- s&box resolves fonts by filename — the internal font name embedded in the TTF file does not matter
 
 **Checkpoint — add `Checkpoint2D` to any GameObject:**
 - Size the yellow zone to cover the trigger area
 - Set `Heal Amount` if you want HP restored on touch
 
-**Damage zones — add `DamageZone2D` to any GameObject:**
-- Size the zone to match your hazard sprite
-- For complex shapes use multiple `DamageZone2D` components on child GameObjects
+**Damage zones — add `DamageZone2D` alongside a `BoxCollider` (Is Trigger):**
+- Shape the collider visually in the inspector
+- For complex shapes use multiple child GameObjects each with their own `BoxCollider` and `DamageZone2D`
+- Player must be tagged **`player`** for detection to work
 
 ---
 
@@ -432,10 +452,11 @@ Set your camera rotation to `(0, 90, 0)` and position it back on the negative X 
 
 - Platformer ground detection uses a short downward raycast (`0.25` units) — works best with flat horizontal surfaces
 - Wall detection requires wall colliders to have the **`wall`** tag
-- `Collider2D` ignores objects tagged `player` and `trigger` by default — `ITriggerListener` will not fire
+- `Collider2D` uses trace sweeps — `ITriggerListener` will not fire. Use `DamageZone2D` with a `BoxCollider` trigger for damage detection instead
 - The `[Range]` attribute with three arguments shows obsolete warnings — use `[Range(min, max), Step(step)]`
 - Floating damage numbers use `TextRenderer` — font is set via the `Number Font` field using the filename of a font in `Assets/fonts/`
 - Custom fonts must have their filename match exactly what you type in the font field — s&box resolves by filename not internal font name
+- `DamageZone2D` requires the player GameObject to be tagged **`player`** — detection will silently fail without this
 
 ---
 

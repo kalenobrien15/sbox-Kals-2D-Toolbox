@@ -20,6 +20,10 @@ public sealed class HealthHUD2D : Component
 	// ── Bar ───────────────────────────────────────────────────────────────────
 
 	[Property, Group( "Bar" )]
+	[Title( "Bar Background Color" )]
+	public Color BarBackgroundColor { get; set; } = new Color( 0f, 0f, 0f, 0.5f );
+
+	[Property, Group( "Bar" )]
 	[Title( "Bar Color (full)" )]
 	public Color BarColorFull { get; set; } = Color.Green;
 
@@ -89,7 +93,17 @@ public sealed class HealthHUD2D : Component
 	// ── Layout ────────────────────────────────────────────────────────────────
 
 	[Property, Group( "Layout" )]
+	[Title( "Center At Bottom" )]
+	public bool CenterAtBottom { get; set; } = true;
+
+	[Property, Group( "Layout" )]
+	[Range( 0f, 200f ), Step( 1f )]
+	[Title( "Bottom Padding (px)" )]
+	public float BottomPadding { get; set; } = 20f;
+
+	[Property, Group( "Layout" )]
 	[Title( "Position (px from top-left)" )]
+	/// <summary>Only used when Center At Bottom is false.</summary>
 	public Vector2 ScreenPosition { get; set; } = new Vector2( 20f, 20f );
 
 	[Property, Group( "Layout" )]
@@ -119,8 +133,20 @@ public sealed class HealthHUD2D : Component
 		if ( _panel is null ) return;
 
 		_panel.Panel.Style.Position = PositionMode.Absolute;
-		_panel.Panel.Style.Left     = ScreenPosition.x;
-		_panel.Panel.Style.Top      = ScreenPosition.y;
+
+		if ( CenterAtBottom )
+		{
+			// Center using left 50% — works at any resolution
+			_panel.Panel.Style.Left   = Length.Percent( 50f );
+			_panel.Panel.Style.Bottom = Length.Pixels( BottomPadding );
+			_panel.Panel.Style.Top    = Length.Auto;
+			_panel.Panel.Style.Right  = Length.Auto;
+		}
+		else
+		{
+			_panel.Panel.Style.Left   = Length.Pixels( ScreenPosition.x );
+			_panel.Panel.Style.Top    = Length.Pixels( ScreenPosition.y );
+		}
 
 		UpdateHealth( health.CurrentHealth, health.MaxHealth );
 
@@ -141,8 +167,9 @@ public sealed class HealthHUD2D : Component
 		_panel.HeartMode          = HeartMode;
 		_panel.ShowText           = ShowHPText;
 		_panel.LowHealthThreshold = LowHealthThreshold;
-		_panel.FullColor          = ToCss( BarColorFull );
-		_panel.LowColor           = ToCss( BarColorLow );
+		_panel.BackgroundColor    = ToCssAlpha( BarBackgroundColor );
+		_panel.FullColor          = ToCssAlpha( BarColorFull );
+		_panel.LowColor           = ToCssAlpha( BarColorLow );
 		_panel.TextColor          = ToCss( HPTextColor );
 		_panel.BarWidth           = BarWidth;
 		_panel.BarHeight          = BarHeight;
@@ -161,4 +188,7 @@ public sealed class HealthHUD2D : Component
 
 	private static string ToCss( Color c ) =>
 		$"rgb({(int)(c.r*255)},{(int)(c.g*255)},{(int)(c.b*255)})";
+
+	private static string ToCssAlpha( Color c ) =>
+		$"rgba({(int)(c.r*255)},{(int)(c.g*255)},{(int)(c.b*255)},{c.a:F2})";
 }

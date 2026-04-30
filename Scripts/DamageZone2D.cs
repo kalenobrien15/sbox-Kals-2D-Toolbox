@@ -1,5 +1,13 @@
 using Sandbox;
+using System.Collections.Generic;
+using System.Linq;
 
+/// <summary>
+/// Damage zone for 2D games.
+/// Add a BoxCollider to the same GameObject and set Is Trigger to true.
+/// The player needs a BoxCollider (not trigger) tagged "player".
+/// Shape and position are controlled entirely by the BoxCollider in the inspector.
+/// </summary>
 [Title( "Damage Zone 2D" )]
 [Category( "2D" )]
 [Icon( "dangerous" )]
@@ -23,48 +31,42 @@ public sealed class DamageZone2D : Component
 	[Title( "Tick Duration (s)" )]
 	public float TickDuration { get; set; } = 3f;
 
-	[Property, Group( "Shape" )]
-	[Range( 1f, 500f ), Step( 1f )]
-	public float Width { get; set; } = 32f;
-
-	[Property, Group( "Shape" )]
-	[Range( 1f, 500f ), Step( 1f )]
-	public float Height { get; set; } = 32f;
-
-	[Property, Group( "Shape" )]
-	public Vector3 Offset { get; set; } = Vector3.Zero;
-
-	private BBox Bounds => new BBox(
-		Offset + new Vector3( -1f, -Width / 2f, -Height / 2f ),
-		Offset + new Vector3(  1f,  Width / 2f,  Height / 2f )
-	);
-
-	private Health2D _health;
+	private List<BoxCollider> _colliders = new();
 
 	protected override void OnStart()
 	{
-		_health = Scene.GetAllComponents<Health2D>().FirstOrDefault();
+		// Get all BoxColliders on this GameObject and its children
+		_colliders = Components.GetAll<BoxCollider>( FindMode.EverythingInSelfAndDescendants ).ToList();
+
+		if ( _colliders.Count == 0 )
+		{
+			Log.Warning( "DamageZone2D: No BoxColliders found. Add at least one and set Is Trigger to true." );
+			return;
+		}
+
+		foreach ( var col in _colliders )
+			col.OnTriggerEnter += OnTriggerEnter;
 	}
 
-	protected override void OnUpdate()
+	protected override void OnDestroy()
 	{
-		if ( _health is null )
-			_health = Scene.GetAllComponents<Health2D>().FirstOrDefault();
-		if ( _health is null ) return;
+		foreach ( var col in _colliders )
+			if ( col is not null )
+				col.OnTriggerEnter -= OnTriggerEnter;
+	}
 
-		var localPos = WorldTransform.PointToLocal( _health.WorldPosition );
-		var b        = Bounds;
-		var inside   = localPos.x >= b.Mins.x && localPos.x <= b.Maxs.x
-		            && localPos.y >= b.Mins.y && localPos.y <= b.Maxs.y
-		            && localPos.z >= b.Mins.z && localPos.z <= b.Maxs.z;
+	private void OnTriggerEnter( Collider other )
+	{
+		if ( !other.Tags.Has( "player" ) ) return;
 
-		if ( !inside ) return;
+		var health = other.GameObject.GetComponent<Health2D>();
+		if ( health is null )
+			health = other.GameObject.Components.GetInAncestors<Health2D>();
+		if ( health is null ) return;
 
 		if ( IsTicking )
-			_health.ApplyTickingDamage( Damage, TickInterval, TickDuration );
+			health.ApplyTickingDamage( Damage, TickInterval, TickDuration );
 		else
-			_health.TakeDamage( Damage, WorldPosition );
+			health.TakeDamage( Damage, WorldPosition );
 	}
-
-
 }

@@ -3,6 +3,7 @@
 @inherits PanelComponent
 
 <root>
+	<div class="hud-center">
 	@if ( HeartMode )
 	{
 		<div class="hearts">
@@ -17,7 +18,7 @@
 	}
 	else
 	{
-		<div class="bar-container" style="width: @(BarWidth)px; height: @(BarHeight)px;">
+		<div class="bar-container" style="width: @(BarWidth)px; height: @(BarHeight)px; background-color: @BackgroundColor;">
 			<div class="bar-fill" style="width: @( HealthPercent )%; height: 100%; background-color: @( HealthPercent <= LowThresholdPercent ? LowColor : FullColor );"></div>
 			@if ( ShowText )
 			{
@@ -25,6 +26,7 @@
 			}
 		</div>
 	}
+	</div>
 </root>
 
 @code
@@ -34,8 +36,9 @@
 	public bool   HeartMode          { get; set; } = false;
 	public bool   ShowText           { get; set; } = true;
 	public float  LowHealthThreshold { get; set; } = 0.25f;
-	public string FullColor          { get; set; } = "rgb(80,200,80)";
-	public string LowColor           { get; set; } = "rgb(220,50,50)";
+	public string BackgroundColor     { get; set; } = "rgba(0,0,0,0.5)";
+	public string FullColor           { get; set; } = "rgb(80,200,80)";
+	public string LowColor            { get; set; } = "rgb(220,50,50)";
 	public string TextColor          { get; set; } = "white";
 	public float  BarWidth           { get; set; } = 200f;
 	public float  BarHeight          { get; set; } = 20f;
@@ -56,6 +59,6 @@
 	{
 		var h1 = System.HashCode.Combine( CurrentHealth, MaxHealth, HeartMode, ShowText );
 		var h2 = System.HashCode.Combine( BarWidth, BarHeight, FontFamily, FontSize );
-		return System.HashCode.Combine( h1, h2, TextPaddingTop, HeartSpacing, HeartSize );
+		return System.HashCode.Combine( h1, h2, TextPaddingTop, HeartSpacing, BackgroundColor );
 	}
 }
